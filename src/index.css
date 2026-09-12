@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #0f1117;
+    color: #f0f2f8;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.font-sans {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Card box shadows specified by design system */
+.wz-card-shadow {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.wz-elevated-shadow {
+  box-shadow: 0 4px 24px rgba(0, 212, 255, 0.08);
+}
+
+/* Slow animated background blobs for landing page */
+@keyframes blobSlow1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(60px, 40px) scale(1.1);
+  }
+}
+
+@keyframes blobSlow2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-50px, -30px) scale(1.08);
+  }
+}
+
+.animate-blob-1 {
+  animation: blobSlow1 24s ease-in-out infinite;
+}
+
+.animate-blob-2 {
+  animation: blobSlow2 30s ease-in-out infinite;
+}
+
+/* Subtle left-to-right shimmer animation for scenario running state */
+@keyframes shimmerPass {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(33, 36, 53, 0.9) 0%,
+    rgba(42, 45, 62, 0.9) 25%,
+    rgba(0, 212, 255, 0.15) 50%,
+    rgba(42, 45, 62, 0.9) 75%,
+    rgba(33, 36, 53, 0.9) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmerPass 1.8s linear infinite;
+}
+
+/* Red border glow animation for locked agents (2 seconds) */
+@keyframes lockGlow {
+  0% {
+    box-shadow: 0 0 0 rgba(255, 77, 106, 0);
+    border-color: #ff4d6a;
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(255, 77, 106, 0.45);
+    border-color: #ff4d6a;
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(255, 77, 106, 0);
+    border-color: #2a2d3e;
+  }
+}
+
+.animate-lock-glow {
+  animation: lockGlow 2s ease-out;
+}
+
+/* Smooth custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f1117;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2d3e;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a5070;
+}

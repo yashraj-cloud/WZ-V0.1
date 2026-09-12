@@ -1,0 +1,7 @@
+{
+  "name": "WorkerZero",
+  "description": "Runtime security gateway that intercepts AI agent tool calls and evaluates them against policy before they execute.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
