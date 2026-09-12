@@ -39,27 +39,36 @@ export interface PendingApproval {
 // In-memory store for human approvals
 const pendingApprovals = new Map<string, PendingApproval>();
 
-// Initialize SQLite database
-const db = new Database('workerzero.db');
-db.pragma('journal_mode = WAL');
+// SQLite database handle — initialized inside start() so failures don't
+// silently prevent the HTTP server from ever accepting connections.
+let db: Database.Database;
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS audit_events (
-    id TEXT PRIMARY KEY,
-    timestamp TEXT,
-    agentId TEXT,
-    toolName TEXT,
-    toolArgs TEXT,
-    decision TEXT,
-    reason TEXT,
-    severity TEXT,
-    message TEXT,
-    traceHash TEXT,
-    findings TEXT
-  );
-  CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp DESC);
-  CREATE INDEX IF NOT EXISTS idx_audit_agentId ON audit_events(agentId);
-`);
+function initDatabase(): Database.Database {
+  const dbPath = process.env.DB_PATH || '/tmp/workerzero.db';
+
+  const database = new Database(dbPath);
+  database.pragma('journal_mode = WAL');
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      timestamp TEXT,
+      agentId TEXT,
+      toolName TEXT,
+      toolArgs TEXT,
+      decision TEXT,
+      reason TEXT,
+      severity TEXT,
+      message TEXT,
+      traceHash TEXT,
+      findings TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_audit_agentId ON audit_events(agentId);
+  `);
+
+  return database;
+}
 
 // In-memory per-agent state
 const agents: Record<string, AgentState> = {};
@@ -671,7 +680,18 @@ function handleUpgrade(req: http.IncomingMessage, socket: any, head: Buffer) {
 }
 
 async function start() {
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // Initialize the database up front, but never let a DB failure take down
+  // the whole process silently — log it clearly and keep the HTTP server
+  // usable (audit persistence is a nice-to-have, not a prerequisite for
+  // accepting connections).
+  try {
+    db = initDatabase();
+  } catch (err) {
+    console.error('Failed to initialize SQLite database:', err);
+    throw err;
+  }
 
   // Vite integration for development
   if (process.env.NODE_ENV !== 'production') {
@@ -691,12 +711,58 @@ async function start() {
   // Primary Server on port 3000 (standard single full-stack port)
   const server = http.createServer(app);
   server.on('upgrade', handleUpgrade);
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`WorkerZero server running on port ${PORT}`);
-    console.log(`  ➜  Dashboard & Gateway API: http://0.0.0.0:${PORT}/`);
-    console.log(`  ➜  Interception Endpoint:   http://0.0.0.0:${PORT}/intercept`);
-    console.log(`  ➜  WebSocket Stream:        ws://0.0.0.0:${PORT}/ws`);
+
+  // Surface any low-level server errors (EADDRINUSE, EACCES, etc.) instead
+  // of failing silently after we've already logged a "running" message.
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    console.error('HTTP server error:', err);
+    if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+      process.exit(1);
+    }
   });
+
+  server.on('clientError', (err, socket) => {
+    console.error('HTTP client connection error:', err);
+    if (socket.writable) {
+      socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, '0.0.0.0', () => {
+      server.removeListener('error', reject);
+      resolve();
+    });
+  });
+
+  console.log(`WorkerZero server running on port ${PORT}`);
+  console.log(`  ➜  Dashboard & Gateway API: http://0.0.0.0:${PORT}/`);
+  console.log(`  ➜  Interception Endpoint:   http://0.0.0.0:${PORT}/intercept`);
+  console.log(`  ➜  WebSocket Stream:        ws://0.0.0.0:${PORT}/ws`);
+
+  // Validate that the server is actually accepting connections before
+  // considering startup complete. This catches cases where listen()
+  // resolves but the socket isn't really accepting traffic.
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const testSocket = http.get(
+        { host: '127.0.0.1', port: PORT, path: '/health', timeout: 5000 },
+        (res) => {
+          res.resume();
+          resolve();
+        }
+      );
+      testSocket.on('error', (err) => reject(err));
+      testSocket.on('timeout', () => {
+        testSocket.destroy();
+        reject(new Error('Timed out validating server connection'));
+      });
+    });
+    console.log('Server connection validation succeeded.');
+  } catch (err) {
+    console.error('Server connection validation failed:', err);
+  }
 
   const shutdown = () => {
     server.close(() => {
@@ -709,4 +775,5 @@ async function start() {
 
 start().catch((err) => {
   console.error('Failed to start WorkerZero server:', err);
+  process.exit(1);
 });
