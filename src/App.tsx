@@ -10,6 +10,7 @@ import ActiveAgents from './components/ActiveAgents';
 import ActivePolicies from './components/ActivePolicies';
 import LandingPage from './components/LandingPage';
 import IntegratePage from './components/IntegratePage';
+import ConnectPage from './components/ConnectPage';
 
 export default function App() {
   // Simple state-based router with window.history.pushState
@@ -38,8 +39,8 @@ export default function App() {
   // Connects to gateway: use same-origin so requests always reach the backend in any environment (preview or local)
   const API_BASE = '';
   const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsHost = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
-  const WS_URL = `${wsProtocol}//${wsHost}/ws`;
+  const wsHost = typeof window !== 'undefined' && window.location.host ? window.location.host : '';
+  const WS_URL = wsHost ? `${wsProtocol}//${wsHost}/ws` : '';
 
   // State
   const [connected, setConnected] = useState(false);
@@ -155,6 +156,15 @@ export default function App() {
         fetchAgents();
       } else if (data.type === 'AGENT_RESET') {
         fetchAgents();
+      } else if (data.type === 'AUDIT_CLEARED') {
+        setEvents([]);
+        setStats({
+          total: 0,
+          blocked: 0,
+          redacted: 0,
+          allowed: 0,
+          critical: 0,
+        });
       }
     } catch (err) {
       console.error('WebSocket message parsing error:', err);
@@ -349,9 +359,21 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Clear audit log from UI
-  const handleClearAuditLog = () => {
+  // Clear audit log from UI and server
+  const handleClearAuditLog = async () => {
     setEvents([]);
+    setStats({
+      total: 0,
+      blocked: 0,
+      redacted: 0,
+      allowed: 0,
+      critical: 0,
+    });
+    try {
+      await fetch(`${API_BASE}/audit`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('handleClearAuditLog warning:', err);
+    }
   };
 
   // Route 1: Landing Page at root route /
@@ -364,9 +386,14 @@ export default function App() {
     return (
       <IntegratePage
         onNavigate={navigate}
-        apiBase="http://localhost:3001"
+        apiBase={typeof window !== 'undefined' ? window.location.origin : ''}
       />
     );
+  }
+
+  // Route 2b: Connect Agent Page at /connect
+  if (currentPath === '/connect') {
+    return <ConnectPage onNavigate={navigate} />;
   }
 
   // Route 3: Dashboard at /dashboard (and default)
@@ -395,7 +422,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Center: navigation links DASHBOARD and INTEGRATE — 13px medium weight, secondary text color. Active link has cyan color and 2px cyan underline */}
+          {/* Center: navigation links DASHBOARD, INTEGRATE, and CONNECT AGENT — 13px medium weight, secondary text color. Active link has cyan color and 2px cyan underline */}
           <nav className="flex items-center gap-6 h-[56px]">
             <button
               onClick={() => navigate('/dashboard')}
@@ -408,6 +435,12 @@ export default function App() {
               className="h-full flex items-center text-[13px] font-medium font-sans text-[#8b92a8] hover:text-[#f0f2f8] transition-colors cursor-pointer border-b-2 border-transparent"
             >
               INTEGRATE
+            </button>
+            <button
+              onClick={() => navigate('/connect')}
+              className="h-full flex items-center text-[13px] font-medium font-sans text-[#8b92a8] hover:text-[#f0f2f8] transition-colors cursor-pointer border-b-2 border-transparent"
+            >
+              CONNECT AGENT
             </button>
           </nav>
 
@@ -515,4 +548,3 @@ export default function App() {
     </div>
   );
 }
-
