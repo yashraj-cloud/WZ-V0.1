@@ -1,26 +1,9 @@
 import React, { useState } from 'react';
-import { ArrowRight, Check, Copy, Download, Play, Loader2 } from 'lucide-react';
+import { ArrowRight, Check, Copy, Download } from 'lucide-react';
 
 interface ConnectPageProps {
   onNavigate: (path: string) => void;
 }
-
-interface TestResult {
-  decision: string;
-  reason: string;
-  severity: string;
-  message: string;
-  traceHash: string;
-  approvalId?: string;
-}
-
-const TOOL_OPTIONS = [
-  'search_documents',
-  'send_email',
-  'delete_database',
-  'export_data',
-  'transfer_funds',
-];
 
 export default function ConnectPage({ onNavigate }: ConnectPageProps) {
   const origin =
@@ -29,91 +12,56 @@ export default function ConnectPage({ onNavigate }: ConnectPageProps) {
       : 'http://localhost:3000';
 
   const [copiedUrl, setCopiedUrl] = useState(false);
-  const [activeTab, setActiveTab] = useState<'python' | 'javascript' | 'nodejs'>('python');
+  const [activeTab, setActiveTab] = useState<'python' | 'javascript'>('python');
   const [copiedSdk, setCopiedSdk] = useState(false);
-
-  // Live connection tester state
-  const [agentId, setAgentId] = useState('my-agent');
-  const [toolName, setToolName] = useState('search_documents');
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [testError, setTestError] = useState<string | null>(null);
 
   const pythonCode = `import requests, time
 
-WORKERZERO = "${origin}"
-
-def workerzero_check(tool_name, tool_args, agent_id="my-agent"):
-    r = requests.post(f"{WORKERZERO}/intercept", json={
-        "agentId": agent_id,
+def wz(tool_name, tool_args):
+    r = requests.post("${origin}/intercept", json={
+        "agentId": "my-agent",
         "toolName": tool_name,
         "toolArgs": tool_args,
         "tokenDelta": 150,
         "usdDelta": 0.0015
-    }, timeout=10)
-    result = r.json()
-    decision = result.get("decision")
-    
-    if decision == "BLOCK":
-        raise PermissionError(f"WorkerZero blocked: {result.get('message')}")
-    
-    if decision == "REDACT":
-        return result.get("sanitizedArgs", tool_args)
-    
-    if decision == "PENDING":
-        approval_id = result.get("approvalId")
-        print(f"Waiting for human approval... (check your WorkerZero dashboard)")
+    }, timeout=10).json()
+
+    if r["decision"] == "BLOCK":
+        raise PermissionError(r["message"])
+
+    if r["decision"] == "REDACT":
+        return r["sanitizedArgs"]
+
+    if r["decision"] == "PENDING":
+        print(f"Waiting for human approval on your dashboard...")
         for _ in range(30):
             time.sleep(2)
-            status = requests.get(f"{WORKERZERO}/approvals/{approval_id}/status").json().get("status")
-            if status == "approved":
-                return tool_args
-            elif status == "denied":
-                raise PermissionError("WorkerZero: Human denied this action")
-        raise TimeoutError("WorkerZero: No human response in 60 seconds")
-    
-    return tool_args
+            s = requests.get(f"${origin}/approvals/{r['approvalId']}/status").json()["status"]
+            if s == "approved": return tool_args
+            if s == "denied": raise PermissionError("Denied by human")
 
-# Usage — call before every tool execution:
-# safe_args = workerzero_check("send_email", {"to": "ceo@company.com"})`;
+    return tool_args`;
 
-  const javascriptCode = `const WORKERZERO = "${origin}";
-
-async function workerzeroCheck(toolName, toolArgs, agentId = "my-agent") {
-  const res = await fetch(\`\${WORKERZERO}/intercept\`, {
+  const javascriptCode = `async function wz(toolName, toolArgs) {
+  const r = await fetch("${origin}/intercept", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agentId, toolName, toolArgs, tokenDelta: 150, usdDelta: 0.0015 })
-  });
-  const result = await res.json();
+    body: JSON.stringify({ agentId: "my-agent", toolName, toolArgs, tokenDelta: 150, usdDelta: 0.0015 })
+  }).then(r => r.json());
 
-  if (result.decision === "BLOCK")
-    throw new Error(\`WorkerZero blocked: \${result.message}\`);
-
-  if (result.decision === "REDACT")
-    return result.sanitizedArgs || toolArgs;
-
-  if (result.decision === "PENDING") {
-    const approvalId = result.approvalId;
-    console.log("Waiting for human approval on WorkerZero dashboard...");
+  if (r.decision === "BLOCK") throw new Error(r.message);
+  if (r.decision === "REDACT") return r.sanitizedArgs;
+  if (r.decision === "PENDING") {
+    console.log("Waiting for human approval...");
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 2000));
-      const { status } = await fetch(\`\${WORKERZERO}/approvals/\${approvalId}/status\`).then(r => r.json());
-      if (status === "approved") return toolArgs;
-      if (status === "denied") throw new Error("WorkerZero: Human denied this action");
+      const s = await fetch(\`${origin}/approvals/\${r.approvalId}/status\`).then(r => r.json());
+      if (s.status === "approved") return toolArgs;
+      if (s.status === "denied") throw new Error("Denied by human");
     }
-    throw new Error("WorkerZero: Timeout waiting for human approval");
   }
-
   return toolArgs;
-}
-
-// Usage — call before every tool execution:
-// const safeArgs = await workerzeroCheck("send_email", { to: "ceo@company.com" });`;
-
-  const nodejsCode = `const fetch = require("node-fetch"); // npm install node-fetch
-
-${javascriptCode}`;
+}`;
 
   const getCurrentSdkCode = () => {
     switch (activeTab) {
@@ -121,8 +69,6 @@ ${javascriptCode}`;
         return pythonCode;
       case 'javascript':
         return javascriptCode;
-      case 'nodejs':
-        return nodejsCode;
     }
   };
 
@@ -138,143 +84,66 @@ ${javascriptCode}`;
     setTimeout(() => setCopiedSdk(false), 2000);
   };
 
-  const handleTestConnection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setTesting(true);
-    setTestError(null);
-
-    try {
-      const res = await fetch('/intercept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          agentId: agentId.trim() || 'my-agent',
-          toolName,
-          toolArgs: { source: 'live_connection_test', timestamp: new Date().toISOString() },
-          tokenDelta: 150,
-          usdDelta: 0.0015,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        setTestError(data.error);
-        setTestResult(null);
-      } else {
-        setTestResult({
-          decision: data.decision || 'UNKNOWN',
-          reason: data.reason || '—',
-          severity: data.severity || 'INFO',
-          message: data.message || '—',
-          traceHash: data.traceHash || '—',
-          approvalId: data.approvalId,
-        });
-      }
-    } catch (err: any) {
-      setTestError(err.message || 'Failed to reach /intercept endpoint.');
-      setTestResult(null);
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  const renderDecisionBadge = (decision: string) => {
-    switch (decision) {
-      case 'ALLOW':
-        return (
-          <span className="px-3 py-1 rounded-[6px] text-xs font-bold font-mono tracking-wider bg-[#00e5a0]/15 text-[#00e5a0] border border-[#00e5a0]/35">
-            ALLOW
-          </span>
-        );
-      case 'BLOCK':
-        return (
-          <span className="px-3 py-1 rounded-[6px] text-xs font-bold font-mono tracking-wider bg-[#ff4d6a]/15 text-[#ff4d6a] border border-[#ff4d6a]/35">
-            BLOCK
-          </span>
-        );
-      case 'REDACT':
-        return (
-          <span className="px-3 py-1 rounded-[6px] text-xs font-bold font-mono tracking-wider bg-[#ffb547]/15 text-[#ffb547] border border-[#ffb547]/35">
-            REDACT
-          </span>
-        );
-      case 'PENDING':
-        return (
-          <span className="px-3 py-1 rounded-[6px] text-xs font-bold font-mono tracking-wider bg-[#00d4ff]/15 text-[#00d4ff] border border-[#00d4ff]/35">
-            PENDING
-          </span>
-        );
-      default:
-        return (
-          <span className="px-3 py-1 rounded-[6px] text-xs font-bold font-mono tracking-wider bg-[#212435] text-[#f0f2f8] border border-[#2a2d3e]">
-            {decision}
-          </span>
-        );
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#0f1117] text-[#f0f2f8] font-sans antialiased flex flex-col justify-between selection:bg-[#00d4ff]/20 selection:text-[#00d4ff]">
-      {/* 56px Header matching App.tsx */}
-      <header className="h-[56px] sticky top-0 z-40 bg-[#1a1d27] border-b border-[#2a2d3e] px-6 flex items-center justify-between">
+    <div className="min-h-screen bg-[#0D1117] text-[#E6EDF3] font-sans antialiased flex flex-col justify-between">
+      {/* Header */}
+      <header className="h-[56px] sticky top-0 z-40 bg-[#161B22] border-b border-[#30363D] px-6 flex items-center justify-between">
         <div className="max-w-7xl w-full mx-auto flex items-center justify-between h-full">
-          {/* Left: Logo 32px gradient square, WorkerZero 15px bold white, divider, Runtime Gateway 12px muted */}
           <div
             onClick={() => onNavigate('/')}
             className="flex items-center gap-3 cursor-pointer group"
             title="WorkerZero Home"
           >
-            <div className="w-8 h-8 rounded-[6px] bg-gradient-to-br from-[#00d4ff] to-[#7c6af7] flex items-center justify-center text-white font-bold font-mono text-sm tracking-wide shadow-sm group-hover:opacity-90 transition-opacity">
+            <div className="w-8 h-8 rounded-[6px] bg-gradient-to-br from-[#2F81F7] to-[#BC8CFF] flex items-center justify-center text-white font-bold font-mono text-sm tracking-wide shadow-sm">
               W
             </div>
             <div className="flex items-center gap-2.5">
-              <span className="font-bold text-[15px] text-white tracking-tight font-sans">
+              <span className="font-bold text-[15px] text-[#E6EDF3] tracking-tight font-sans">
                 WorkerZero
               </span>
-              <div className="h-4 w-[1px] bg-[#2a2d3e]" />
-              <span className="text-[12px] text-[#4a5070] font-sans hidden sm:inline">
+              <div className="h-4 w-[1px] bg-[#30363D]" />
+              <span className="text-[12px] text-[#484F58] font-sans hidden sm:inline">
                 Runtime Gateway
               </span>
             </div>
           </div>
 
-          {/* Center: Navigation Links */}
           <nav className="flex items-center gap-6 h-full">
             <button
               onClick={() => onNavigate('/dashboard')}
-              className="h-full flex items-center text-[13px] font-medium font-sans text-[#8b92a8] hover:text-[#f0f2f8] transition-colors cursor-pointer border-b-2 border-transparent"
+              className="h-full flex items-center text-[13px] font-medium font-sans text-[#8B949E] hover:text-[#E6EDF3] transition-colors cursor-pointer border-b-2 border-transparent"
             >
               DASHBOARD
             </button>
             <button
               onClick={() => onNavigate('/integrate')}
-              className="h-full flex items-center text-[13px] font-medium font-sans text-[#8b92a8] hover:text-[#f0f2f8] transition-colors cursor-pointer border-b-2 border-transparent"
+              className="h-full flex items-center text-[13px] font-medium font-sans text-[#8B949E] hover:text-[#E6EDF3] transition-colors cursor-pointer border-b-2 border-transparent"
             >
               INTEGRATE
             </button>
             <button
               onClick={() => onNavigate('/connect')}
-              className="h-full flex items-center text-[13px] font-medium font-sans text-[#00d4ff] border-b-2 border-[#00d4ff] cursor-pointer"
+              className="h-full flex items-center text-[13px] font-medium font-sans text-[#2F81F7] border-b-2 border-[#2F81F7] cursor-pointer"
             >
               CONNECT AGENT
             </button>
           </nav>
 
-          {/* Right: Download zip & Return to dashboard button */}
           <div className="flex items-center gap-3">
             <a
               href="/download-project.zip"
               download="workerzero-project.zip"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] border border-[#2a2d3e] hover:border-[#00d4ff] text-[#8b92a8] hover:text-[#00d4ff] text-xs font-medium font-sans transition-colors cursor-pointer bg-transparent"
-              title="Download complete WorkerZero project as ZIP (workerzero-project.zip)"
+              className="wz-btn-secondary px-3 py-1.5 text-xs font-medium font-sans transition-colors cursor-pointer flex items-center gap-1.5"
+              title="Download ZIP"
             >
               <Download className="w-3.5 h-3.5" />
               <span>DOWNLOAD ZIP</span>
             </a>
             <button
               onClick={() => onNavigate('/dashboard')}
-              className="px-3.5 py-1.5 rounded-[6px] bg-[#212435] hover:bg-[#282b3d] text-[#00d4ff] border border-[#2a2d3e] hover:border-[#00d4ff]/40 text-xs font-sans font-medium transition-colors cursor-pointer flex items-center gap-1.5"
+              className="wz-btn-primary px-3.5 py-1.5 text-xs font-sans font-medium transition-colors cursor-pointer flex items-center gap-1.5"
             >
-              <span>OPEN CONSOLE</span>
+              <span>OPEN DASHBOARD</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -282,39 +151,47 @@ ${javascriptCode}`;
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 space-y-12">
-        {/* Page Title & Subtitle */}
-        <div className="space-y-2">
-          <h1 className="text-3xl sm:text-4xl font-bold font-sans text-white tracking-tight">
-            Connect Your Agent
+      <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-12 space-y-12">
+        {/* Page Title */}
+        <div className="space-y-2 text-center max-w-xl mx-auto">
+          <h1 className="text-3xl font-bold font-sans text-[#E6EDF3] tracking-tight">
+            Connect Your Agent in Under 60 Seconds
           </h1>
-          <p className="text-base text-[#8b92a8] font-sans">
-            One function. Any agent. Full protection.
+          <p className="text-sm text-[#8B949E] font-sans">
+            Follow these four simple steps to put your AI agent under complete runtime control.
           </p>
         </div>
 
-        {/* Section 1 — Your WorkerZero URL */}
-        <section className="space-y-3">
-          <label className="block text-sm font-medium text-[#8b92a8] font-sans">
-            Your WorkerZero Endpoint — paste this into your agent.
-          </label>
-          <div className="bg-[#1a1d27] border border-[#2a2d3e] rounded-[10px] p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 wz-card-shadow">
-            <div className="flex-1 bg-[#0a0c14] border border-[#2a2d3e] rounded-[8px] px-4 py-3.5 font-mono text-sm sm:text-base text-[#00d4ff] select-all overflow-x-auto whitespace-nowrap">
+        {/* Step 1 */}
+        <section className="bg-[#161B22] border border-[#30363D] rounded-[6px] p-6 space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-full bg-[#2F81F7]/15 border border-[#2F81F7]/30 text-[#2F81F7] font-mono text-xs font-bold flex items-center justify-center">
+              1
+            </div>
+            <h2 className="text-base font-bold text-[#E6EDF3] font-sans">
+              Copy your endpoint
+            </h2>
+          </div>
+          <p className="text-xs text-[#8B949E] font-sans">
+            Your WorkerZero runtime gateway URL:
+          </p>
+          <div className="bg-[#0D1117] border border-[#30363D] rounded-[6px] p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex-1 font-mono text-xs sm:text-sm text-[#2F81F7] select-all overflow-x-auto whitespace-nowrap">
               {origin}
             </div>
             <button
               type="button"
               onClick={handleCopyUrl}
-              className="px-5 py-3.5 rounded-[8px] bg-[#00d4ff] hover:bg-[#00d4ff]/90 text-[#0f1117] font-sans font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer flex items-center justify-center gap-2 shrink-0"
+              className="wz-btn-secondary px-4 py-2 text-xs font-mono font-bold tracking-wider uppercase transition-colors cursor-pointer flex items-center justify-center gap-2 shrink-0"
             >
               {copiedUrl ? (
                 <>
-                  <Check className="w-4 h-4" />
-                  <span>COPIED</span>
+                  <Check className="w-3.5 h-3.5 text-[#3FB950]" />
+                  <span className="text-[#3FB950]">COPIED</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-4 h-4" />
+                  <Copy className="w-3.5 h-3.5" />
                   <span>COPY</span>
                 </>
               )}
@@ -322,28 +199,31 @@ ${javascriptCode}`;
           </div>
         </section>
 
-        {/* Section 2 — One-click copy SDK */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white font-sans">
-              One-Click Copy SDK
+        {/* Step 2 */}
+        <section className="bg-[#161B22] border border-[#30363D] rounded-[6px] p-6 space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-full bg-[#2F81F7]/15 border border-[#2F81F7]/30 text-[#2F81F7] font-mono text-xs font-bold flex items-center justify-center">
+              2
+            </div>
+            <h2 className="text-base font-bold text-[#E6EDF3] font-sans">
+              Copy this one function
             </h2>
-            <span className="text-xs text-[#8b92a8] font-sans">
-              Handles ALLOW, BLOCK, REDACT &amp; PENDING
-            </span>
           </div>
 
-          <div className="bg-[#1a1d27] border border-[#2a2d3e] rounded-[10px] overflow-hidden wz-card-shadow">
-            {/* Tabs & Copy Header */}
-            <div className="bg-[#151822] border-b border-[#2a2d3e] px-4 flex items-center justify-between">
+          <p className="text-xs font-sans text-[#E6EDF3] font-bold">
+            Copy this function into your agent file. That’s the entire integration.
+          </p>
+
+          <div className="border border-[#30363D] rounded-[6px] overflow-hidden">
+            <div className="bg-[#21262D] border-b border-[#30363D] px-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setActiveTab('python')}
-                  className={`px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors cursor-pointer ${
+                  className={`px-4 py-2.5 text-xs font-mono font-semibold border-b-2 transition-colors cursor-pointer ${
                     activeTab === 'python'
-                      ? 'border-[#00d4ff] text-[#00d4ff]'
-                      : 'border-transparent text-[#8b92a8] hover:text-white'
+                      ? 'border-[#2F81F7] text-[#2F81F7]'
+                      : 'border-transparent text-[#8B949E] hover:text-[#E6EDF3]'
                   }`}
                 >
                   Python
@@ -351,36 +231,25 @@ ${javascriptCode}`;
                 <button
                   type="button"
                   onClick={() => setActiveTab('javascript')}
-                  className={`px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors cursor-pointer ${
+                  className={`px-4 py-2.5 text-xs font-mono font-semibold border-b-2 transition-colors cursor-pointer ${
                     activeTab === 'javascript'
-                      ? 'border-[#00d4ff] text-[#00d4ff]'
-                      : 'border-transparent text-[#8b92a8] hover:text-white'
+                      ? 'border-[#2F81F7] text-[#2F81F7]'
+                      : 'border-transparent text-[#8B949E] hover:text-[#E6EDF3]'
                   }`}
                 >
                   JavaScript
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('nodejs')}
-                  className={`px-4 py-3 text-xs font-mono font-semibold border-b-2 transition-colors cursor-pointer ${
-                    activeTab === 'nodejs'
-                      ? 'border-[#00d4ff] text-[#00d4ff]'
-                      : 'border-transparent text-[#8b92a8] hover:text-white'
-                  }`}
-                >
-                  Node.js
                 </button>
               </div>
 
               <button
                 type="button"
                 onClick={handleCopySdk}
-                className="px-3.5 py-1.5 rounded-[6px] bg-[#212435] hover:bg-[#282b3d] border border-[#2a2d3e] hover:border-[#00d4ff]/40 text-xs font-mono font-semibold text-[#f0f2f8] hover:text-[#00d4ff] transition-colors cursor-pointer flex items-center gap-1.5"
+                className="wz-btn-secondary px-3 py-1 text-xs font-mono font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 {copiedSdk ? (
                   <>
-                    <Check className="w-3.5 h-3.5 text-[#00e5a0]" />
-                    <span className="text-[#00e5a0]">COPIED</span>
+                    <Check className="w-3.5 h-3.5 text-[#3FB950]" />
+                    <span className="text-[#3FB950]">COPIED</span>
                   </>
                 ) : (
                   <>
@@ -391,207 +260,92 @@ ${javascriptCode}`;
               </button>
             </div>
 
-            {/* Code Display */}
-            <div className="p-5 bg-[#0a0c14]">
-              <pre className="text-xs sm:text-[13px] font-mono leading-relaxed text-[#f0f2f8] overflow-x-auto">
+            <div className="p-4 bg-[#0D1117]">
+              <pre className="text-xs font-mono leading-relaxed text-[#E6EDF3] overflow-x-auto">
                 <code>{getCurrentSdkCode()}</code>
               </pre>
             </div>
           </div>
         </section>
 
-        {/* Section 3 — Test your connection */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white font-sans">
-              Test Your Connection
+        {/* Step 3 */}
+        <section className="bg-[#161B22] border border-[#30363D] rounded-[6px] p-6 space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-full bg-[#2F81F7]/15 border border-[#2F81F7]/30 text-[#2F81F7] font-mono text-xs font-bold flex items-center justify-center">
+              3
+            </div>
+            <h2 className="text-base font-bold text-[#E6EDF3] font-sans">
+              Call it before every tool
             </h2>
-            <span className="text-xs text-[#8b92a8] font-sans">
-              Live POST /intercept verification
-            </span>
           </div>
 
-          <div className="bg-[#1a1d27] border border-[#2a2d3e] rounded-[10px] p-6 space-y-6 wz-card-shadow">
-            <form
-              onSubmit={handleTestConnection}
-              className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end"
-            >
-              {/* Agent ID Input */}
-              <div className="md:col-span-5 space-y-2">
-                <label
-                  htmlFor="connect-agent-id"
-                  className="block text-xs font-medium text-[#8b92a8] font-sans"
-                >
-                  Agent ID
-                </label>
-                <input
-                  id="connect-agent-id"
-                  type="text"
-                  value={agentId}
-                  onChange={(e) => setAgentId(e.target.value)}
-                  placeholder="my-agent"
-                  className="w-full bg-[#0a0c14] border border-[#2a2d3e] focus:border-[#00d4ff] rounded-[8px] px-3.5 py-2.5 text-sm font-mono text-white placeholder-[#4a5070] outline-none transition-colors"
-                />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left Column: Before */}
+            <div className="bg-[#4A0D0D]/40 border border-[#8B1A1A] rounded-[6px] p-4 space-y-2">
+              <div className="text-xs font-bold font-sans text-[#F85149]">
+                Before WorkerZero
               </div>
+              <pre className="text-xs font-mono text-[#E6EDF3] bg-[#0D1117] p-3 rounded-[4px] border border-[#30363D] overflow-x-auto">
+                <code>{`# Agent calls tool directly — no protection
+delete_database("production")`}</code>
+              </pre>
+            </div>
 
-              {/* Tool Name Dropdown */}
-              <div className="md:col-span-4 space-y-2">
-                <label
-                  htmlFor="connect-tool-name"
-                  className="block text-xs font-medium text-[#8b92a8] font-sans"
-                >
-                  Tool Name
-                </label>
-                <select
-                  id="connect-tool-name"
-                  value={toolName}
-                  onChange={(e) => setToolName(e.target.value)}
-                  className="w-full bg-[#0a0c14] border border-[#2a2d3e] focus:border-[#00d4ff] rounded-[8px] px-3.5 py-2.5 text-sm font-mono text-white outline-none transition-colors cursor-pointer"
-                >
-                  {TOOL_OPTIONS.map((tool) => (
-                    <option key={tool} value={tool} className="bg-[#0a0c14] text-white">
-                      {tool}
-                    </option>
-                  ))}
-                </select>
+            {/* Right Column: With */}
+            <div className="bg-[#0D4A1A]/40 border border-[#238636] rounded-[6px] p-4 space-y-2">
+              <div className="text-xs font-bold font-sans text-[#3FB950]">
+                With WorkerZero
               </div>
-
-              {/* Big TEST NOW Button */}
-              <div className="md:col-span-3">
-                <button
-                  type="submit"
-                  disabled={testing}
-                  className="w-full py-2.5 px-5 rounded-[8px] bg-[#00d4ff] hover:bg-[#00d4ff]/90 disabled:opacity-50 text-[#0f1117] font-sans font-bold text-sm tracking-wide uppercase transition-colors cursor-pointer flex items-center justify-center gap-2 h-[42px]"
-                >
-                  {testing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>TESTING...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 fill-current" />
-                      <span>TEST NOW</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-
-            {/* Instant Result Display */}
-            {testError && (
-              <div className="bg-[#ff4d6a]/10 border border-[#ff4d6a]/30 rounded-[8px] p-4 text-xs font-mono text-[#ff4d6a]">
-                Error: {testError}
-              </div>
-            )}
-
-            {testResult && (
-              <div className="bg-[#0a0c14] border border-[#2a2d3e] rounded-[8px] p-5 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#2a2d3e]">
-                  <div className="flex items-center gap-3">
-                    {renderDecisionBadge(testResult.decision)}
-                    <span className="text-xs font-mono font-semibold text-white">
-                      {testResult.reason}
-                    </span>
-                  </div>
-                  <div className="text-xs font-mono text-[#8b92a8]">
-                    Trace Hash:{' '}
-                    <span className="text-[#00d4ff]">{testResult.traceHash}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div className="space-y-1">
-                    <span className="text-[#4a5070] font-sans block">Message</span>
-                    <p className="font-mono text-[#f0f2f8]">{testResult.message}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[#4a5070] font-sans block">Reason Code</span>
-                    <p className="font-mono text-[#8b92a8]">
-                      {testResult.reason} ({testResult.severity})
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+              <pre className="text-xs font-mono text-[#E6EDF3] bg-[#0D1117] p-3 rounded-[4px] border border-[#30363D] overflow-x-auto">
+                <code>{`# Check first, then execute
+args = wz("delete_database", {"db": "production"})
+delete_database(args["db"])`}</code>
+              </pre>
+            </div>
           </div>
+
+          <p className="text-xs text-[#8B949E] font-sans pt-1">
+            One line added. Every tool call is now intercepted, evaluated, and logged.
+          </p>
         </section>
 
-        {/* Section 4 — What happens to each decision */}
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold text-white font-sans">
-            What Happens to Each Decision
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* ALLOW card green */}
-            <div className="relative bg-[#1a1d27] border border-[#00e5a0]/30 rounded-[10px] p-5 space-y-3 wz-card-shadow overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#00e5a0]" />
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold tracking-wider text-[#00e5a0]">
-                  ALLOW
-                </span>
-                <span className="h-2 w-2 rounded-full bg-[#00e5a0]" />
-              </div>
-              <p className="text-xs text-[#8b92a8] leading-relaxed font-sans">
-                Tool executes normally. Event logged to audit trail.
-              </p>
+        {/* Step 4 */}
+        <section className="bg-[#161B22] border border-[#30363D] rounded-[6px] p-6 space-y-4 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-full bg-[#2F81F7]/15 border border-[#2F81F7]/30 text-[#2F81F7] font-mono text-xs font-bold flex items-center justify-center">
+              4
             </div>
+            <h2 className="text-base font-bold text-[#E6EDF3] font-sans">
+              Watch it on your dashboard
+            </h2>
+          </div>
 
-            {/* BLOCK card red */}
-            <div className="relative bg-[#1a1d27] border border-[#ff4d6a]/30 rounded-[10px] p-5 space-y-3 wz-card-shadow overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#ff4d6a]" />
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold tracking-wider text-[#ff4d6a]">
-                  BLOCK
-                </span>
-                <span className="h-2 w-2 rounded-full bg-[#ff4d6a]" />
-              </div>
-              <p className="text-xs text-[#8b92a8] leading-relaxed font-sans">
-                Tool is stopped. Agent receives PermissionError. Event logged as CRITICAL or HIGH.
-              </p>
-            </div>
+          <p className="text-xs text-[#8B949E] font-sans">
+            Open your dashboard to see every agent action in real time.
+          </p>
 
-            {/* REDACT card amber */}
-            <div className="relative bg-[#1a1d27] border border-[#ffb547]/30 rounded-[10px] p-5 space-y-3 wz-card-shadow overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#ffb547]" />
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold tracking-wider text-[#ffb547]">
-                  REDACT
-                </span>
-                <span className="h-2 w-2 rounded-full bg-[#ffb547]" />
-              </div>
-              <p className="text-xs text-[#8b92a8] leading-relaxed font-sans">
-                PII stripped from args. Tool executes with clean data. Original args never leave your system.
-              </p>
-            </div>
-
-            {/* PENDING card cyan */}
-            <div className="relative bg-[#1a1d27] border border-[#00d4ff]/30 rounded-[10px] p-5 space-y-3 wz-card-shadow overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-[2px] bg-[#00d4ff]" />
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold tracking-wider text-[#00d4ff]">
-                  PENDING
-                </span>
-                <span className="h-2 w-2 rounded-full bg-[#00d4ff]" />
-              </div>
-              <p className="text-xs text-[#8b92a8] leading-relaxed font-sans">
-                Human review required. Agent waits up to 60 seconds. You approve or deny from the dashboard.
-              </p>
-            </div>
+          <div>
+            <button
+              type="button"
+              onClick={() => onNavigate('/dashboard')}
+              className="wz-btn-primary px-6 py-3 text-xs font-bold font-sans tracking-wide transition-colors cursor-pointer inline-flex items-center gap-2"
+            >
+              <span>Open Dashboard</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         </section>
       </main>
 
-      {/* Subtle Footer */}
-      <footer className="border-t border-[#2a2d3e] bg-[#1a1d27]/50 py-6 px-6 mt-12">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#4a5070] font-sans">
-          <span>WorkerZero Runtime Security Gateway</span>
+      {/* Footer */}
+      <footer className="border-t border-[#30363D] bg-[#161B22] py-6 px-6 text-center text-xs text-[#8B949E] font-sans">
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>WorkerZero Runtime Gateway © 2026</div>
           <button
             onClick={() => onNavigate('/dashboard')}
-            className="text-[#00d4ff] hover:underline cursor-pointer font-medium"
+            className="text-[#2F81F7] hover:underline cursor-pointer font-medium"
           >
-            Return to Live Dashboard →
+            Return to Dashboard →
           </button>
         </div>
       </footer>
