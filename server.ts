@@ -8,8 +8,8 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename = typeof __filename !== 'undefined' ? __filename : '';
+const __dirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 async function startServer() {
   const app = express();
