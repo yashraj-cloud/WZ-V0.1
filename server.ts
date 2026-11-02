@@ -8,15 +8,13 @@ import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 
-const __filename = typeof __filename !== 'undefined' ? __filename : '';
-const __dirname = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
 async function startServer() {
   const app = express();
   app.use(express.json());
 
   // Initialize SQLite Database with better-sqlite3
-  const dbPath = path.join(__dirname, "workerzero.db");
+  const dbPath = path.join(process.cwd(), "workerzero.db");
   const db = new Database(dbPath);
 
   db.exec(`
@@ -634,9 +632,9 @@ async function startServer() {
     });
     app.use(viteServer.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    app.use(express.static(path.join(process.cwd(), "dist")));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.join(process.cwd(), "dist", "index.html"));
     });
   }
 
